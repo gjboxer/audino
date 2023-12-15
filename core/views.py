@@ -18,18 +18,17 @@ from .models import Job as JobModel
 from .models import Label as LabelModel
 from .models import Project as ProjectModel
 from .models import Task as TaskModel
-
 from .serializers import *
-
 from .utils import convert_string_lists_to_lists
 from .utils import get_paginator
-
 from users.manager import TokenAuthentication
 from iam.permissions import *
+from organizations.mixins import PartialUpdateModelMixin
 
-class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, 
-    mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin
-):
+
+class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
+                     mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin, PartialUpdateModelMixin
+                     ):
     queryset = ProjectModel.objects.select_related(
         'assignee', 'owner', 'target_storage', 'source_storage',
     ).all()
@@ -39,7 +38,8 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     simple_filters = list(search_fields)
     ordering_fields = list(filter_fields)
     ordering = "-id"
-    lookup_fields = {'owner': 'owner__username', 'assignee': 'assignee__username'}
+    lookup_fields = {'owner': 'owner__username',
+                     'assignee': 'assignee__username'}
     iam_organization_field = 'organization'
 
     def get_serializer_class(self):
@@ -55,204 +55,205 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             perm = ProjectPermission.create_scope_list(self.request)
             queryset = perm.filter(queryset)
         return queryset
-    
+
     @transaction.atomic
     def perform_create(self, serializer, **kwargs):
-        print("perform_create")
         serializer.save(
             owner=self.request.user,
             organization=self.request.iam_context['organization']
         )
-        print("hello")
 
         # After saving the serializer (creating a new object), the line retrieves the saved instance from the database
         serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
 
-@api_view(["GET", "POST"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def get_add_project(request, format=None):
-    if request.method == "POST":
-        organization = request.iam_context['organization']
-
-        data = JSONParser().parse(request)
-
-        if organization:
-            try:
-                data["organization"] = organization.id
-            except Organization.DoesNotExist:
-                return Response(
-                    {"message": "Organization does not exist."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-        source_serializer = StorageSerializer(data=data["source_storage"])
-        target_serializer = StorageSerializer(data=data["target_storage"])
-
-        if source_serializer.is_valid() and target_serializer.is_valid():
-            src = source_serializer.save()
-            tgt = target_serializer.save()
-            data["source_storage"] = src.id
-            data["target_storage"] = tgt.id
-
-        data["owner"] = request.user.id
-        data["assignee"] = data.pop("assignee_id")
-        serializer = ProjectWriteSerializer(data=data)
-        if serializer.is_valid():
-            project_obj = serializer.save()
-            for each_label in data["labels"]:
-                label_object = {
-                    "project": project_obj.id,
-                    "name": each_label["name"],
-                    "label_type": each_label["label_type"],
-                }
-                label_serializer = LabelWriteSerializer(data=label_object)
-                if label_serializer.is_valid():
-                    label_obj = label_serializer.save()
-                    for each_attribute in each_label["attributes"]:
-                        attribute_obj = {
-                            "label": label_obj.id,
-                            "name": each_attribute["name"],
-                            "input_type": each_attribute["input_type"],
-                            "default_value": each_attribute["default_value"],
-                            "values": str(each_attribute["values"]),
-                        }
-                        attribute_serializer = AttributeSerializer(
-                            data=attribute_obj
-                        )
-                        if attribute_serializer.is_valid():
-                            attribute_obj = attribute_serializer.save()
-                            label_obj.attributes.add(attribute_obj)
-                        else:
-                            return Response(
-                                attribute_serializer.errors,
-                                status=status.HTTP_400_BAD_REQUEST,
-                            )
-
-                else:
-                    return Response(
-                        label_serializer.errors, status=status.HTTP_400_BAD_REQUEST
-                    )
-
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    search_query = request.GET.get("search", None)
-    # page = request.GET.get("page", 1)
-    # page_size = request.GET.get("page_size", 10)
-
-    organization = request.iam_context['organization']
-
-    if organization is None:
-        projects = ProjectModel.objects.filter(
-            organization__isnull=True).order_by("created_at")
-
-    else:
-        projects = ProjectModel.objects.select_related(
-            'assignee', 'owner', 'target_storage', 'source_storage').prefetch_related('tasks').all()
-
-    perm = ProjectPermission.create_scope_list(request)
-    projects = perm.filter(projects)
-
-    if search_query:
-        projects = projects.filter(Q(name__icontains=search_query))
-
-    # paginator = get_paginator(page, page_size)
-    paginator = PageNumberPagination()
-    paginated_queryset = paginator.paginate_queryset(projects, request)
-    serializer = ProjectReadSerializer(paginated_queryset, many=True)
-    return paginator.get_paginated_response(serializer.data)
 
 
-@api_view(["GET", "PATCH", "DELETE"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def update_project(request, id, format=None):
-    try:
-        project = ProjectModel.objects.get(id=id)
-    except ProjectModel.DoesNotExist:
-        return Response(
-            {"message": "Project not found"}, status=status.HTTP_404_NOT_FOUND
-        )
 
-    if request.method == "DELETE":
-        serializer = ProjectReadSerializer(project)
-        project.delete()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+# @api_view(["GET", "POST"])
+# @authentication_classes([TokenAuthentication])
+# @permission_classes([IsAuthenticated])
+# def get_add_project(request, format=None):
+#     if request.method == "POST":
+#         organization = request.iam_context['organization']
 
-    if request.method == "PATCH":
-        data = JSONParser().parse(request)
+#         data = JSONParser().parse(request)
 
-        source_serializer = StorageSerializer(
-            project.source_storage, data=data["source_storage"]
-        )
-        target_serializer = StorageSerializer(
-            project.target_storage, data=data["target_storage"]
-        )
+#         if organization:
+#             try:
+#                 data["organization"] = organization.id
+#             except Organization.DoesNotExist:
+#                 return Response(
+#                     {"message": "Organization does not exist."},
+#                     status=status.HTTP_404_NOT_FOUND,
+#                 )
 
-        if source_serializer.is_valid() and target_serializer.is_valid():
-            src = source_serializer.save()
-            tgt = target_serializer.save()
-            data["source_storage"] = src.id
-            data["target_storage"] = tgt.id
+#         source_serializer = StorageSerializer(data=data["source_storage"])
+#         target_serializer = StorageSerializer(data=data["target_storage"])
 
-        serializer = ProjectWriteSerializer(project, data=data)
-        if serializer.is_valid():
-            serializer.save()
-            for each_label in data["labels"]:
-                label_object = {
-                    "project": id,
-                    "name": each_label["name"],
-                    "label_type": each_label["label_type"],
-                }
-                if "id" in each_label:
-                    label = LabelModel.objects.get(id=each_label["id"])
-                    label_serializer = LabelWriteSerializer(
-                        label, data=label_object)
-                else:
-                    label_serializer = LabelWriteSerializer(data=label_object)
+#         if source_serializer.is_valid() and target_serializer.is_valid():
+#             src = source_serializer.save()
+#             tgt = target_serializer.save()
+#             data["source_storage"] = src.id
+#             data["target_storage"] = tgt.id
 
-                if label_serializer.is_valid():
-                    label_obj = label_serializer.save()
-                    for each_attribute in each_label["attributes"]:
-                        attribute_obj = {
-                            "label": label_obj.id,
-                            "name": each_attribute["name"],
-                            "input_type": each_attribute["input_type"],
-                            "default_value": each_attribute["default_value"],
-                            "values": str(each_attribute["values"]),
-                        }
-                        if "id" in each_attribute:
-                            attribute = AttributeModel.objects.get(
-                                id=each_attribute["id"]
-                            )
-                            attribute_serializer = AttributeSerializer(
-                                attribute, data=attribute_obj
-                            )
-                        else:
-                            attribute_serializer = AttributeSerializer(
-                                data=attribute_obj
-                            )
+#         data["owner"] = request.user.id
+#         data["assignee"] = data.pop("assignee_id")
+#         serializer = ProjectWriteSerializer(data=data)
+#         if serializer.is_valid():
+#             project_obj = serializer.save()
+#             for each_label in data["labels"]:
+#                 label_object = {
+#                     "project": project_obj.id,
+#                     "name": each_label["name"],
+#                     "label_type": each_label["label_type"],
+#                 }
+#                 label_serializer = LabelWriteSerializer(data=label_object)
+#                 if label_serializer.is_valid():
+#                     label_obj = label_serializer.save()
+#                     for each_attribute in each_label["attributes"]:
+#                         attribute_obj = {
+#                             "label": label_obj.id,
+#                             "name": each_attribute["name"],
+#                             "input_type": each_attribute["input_type"],
+#                             "default_value": each_attribute["default_value"],
+#                             "values": str(each_attribute["values"]),
+#                         }
+#                         attribute_serializer = AttributeSerializer(
+#                             data=attribute_obj
+#                         )
+#                         if attribute_serializer.is_valid():
+#                             attribute_obj = attribute_serializer.save()
+#                             label_obj.attributes.add(attribute_obj)
+#                         else:
+#                             return Response(
+#                                 attribute_serializer.errors,
+#                                 status=status.HTTP_400_BAD_REQUEST,
+#                             )
 
-                        if attribute_serializer.is_valid():
-                            attribute_obj = attribute_serializer.save()
-                            label_obj.attributes.add(attribute_obj)
-                        else:
-                            return Response(
-                                attribute_serializer.errors,
-                                status=status.HTTP_400_BAD_REQUEST,
-                            )
+#                 else:
+#                     return Response(
+#                         label_serializer.errors, status=status.HTTP_400_BAD_REQUEST
+#                     )
 
-                else:
-                    return Response(
-                        label_serializer.errors, status=status.HTTP_400_BAD_REQUEST
-                    )
+#             return Response(serializer.data, status=status.HTTP_201_CREATED)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#     search_query = request.GET.get("search", None)
+#     # page = request.GET.get("page", 1)
+#     # page_size = request.GET.get("page_size", 10)
 
-    serializer = ProjectReadSerializer(project)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+#     organization = request.iam_context['organization']
+
+#     if organization is None:
+#         projects = ProjectModel.objects.filter(
+#             organization__isnull=True).order_by("created_at")
+
+#     else:
+#         projects = ProjectModel.objects.select_related(
+#             'assignee', 'owner', 'target_storage', 'source_storage').prefetch_related('tasks').all()
+
+#     perm = ProjectPermission.create_scope_list(request)
+#     projects = perm.filter(projects)
+
+#     if search_query:
+#         projects = projects.filter(Q(name__icontains=search_query))
+
+#     # paginator = get_paginator(page, page_size)
+#     paginator = PageNumberPagination()
+#     paginated_queryset = paginator.paginate_queryset(projects, request)
+#     serializer = ProjectReadSerializer(paginated_queryset, many=True)
+#     return paginator.get_paginated_response(serializer.data)
+
+
+# @api_view(["GET", "PATCH", "DELETE"])
+# @authentication_classes([TokenAuthentication])
+# @permission_classes([IsAuthenticated])
+# def update_project(request, id, format=None):
+#     try:
+#         project = ProjectModel.objects.get(id=id)
+#     except ProjectModel.DoesNotExist:
+#         return Response(
+#             {"message": "Project not found"}, status=status.HTTP_404_NOT_FOUND
+#         )
+
+#     if request.method == "DELETE":
+#         serializer = ProjectReadSerializer(project)
+#         project.delete()
+#         return Response(serializer.data, status=status.HTTP_200_OK)
+
+#     if request.method == "PATCH":
+#         data = JSONParser().parse(request)
+
+#         source_serializer = StorageSerializer(
+#             project.source_storage, data=data["source_storage"]
+#         )
+#         target_serializer = StorageSerializer(
+#             project.target_storage, data=data["target_storage"]
+#         )
+
+#         if source_serializer.is_valid() and target_serializer.is_valid():
+#             src = source_serializer.save()
+#             tgt = target_serializer.save()
+#             data["source_storage"] = src.id
+#             data["target_storage"] = tgt.id
+
+#         serializer = ProjectWriteSerializer(project, data=data)
+#         if serializer.is_valid():
+#             serializer.save()
+#             for each_label in data["labels"]:
+#                 label_object = {
+#                     "project": id,
+#                     "name": each_label["name"],
+#                     "label_type": each_label["label_type"],
+#                 }
+#                 if "id" in each_label:
+#                     label = LabelModel.objects.get(id=each_label["id"])
+#                     label_serializer = LabelWriteSerializer(
+#                         label, data=label_object)
+#                 else:
+#                     label_serializer = LabelWriteSerializer(data=label_object)
+
+#                 if label_serializer.is_valid():
+#                     label_obj = label_serializer.save()
+#                     for each_attribute in each_label["attributes"]:
+#                         attribute_obj = {
+#                             "label": label_obj.id,
+#                             "name": each_attribute["name"],
+#                             "input_type": each_attribute["input_type"],
+#                             "default_value": each_attribute["default_value"],
+#                             "values": str(each_attribute["values"]),
+#                         }
+#                         if "id" in each_attribute:
+#                             attribute = AttributeModel.objects.get(
+#                                 id=each_attribute["id"]
+#                             )
+#                             attribute_serializer = AttributeSerializer(
+#                                 attribute, data=attribute_obj
+#                             )
+#                         else:
+#                             attribute_serializer = AttributeSerializer(
+#                                 data=attribute_obj
+#                             )
+
+#                         if attribute_serializer.is_valid():
+#                             attribute_obj = attribute_serializer.save()
+#                             label_obj.attributes.add(attribute_obj)
+#                         else:
+#                             return Response(
+#                                 attribute_serializer.errors,
+#                                 status=status.HTTP_400_BAD_REQUEST,
+#                             )
+
+#                 else:
+#                     return Response(
+#                         label_serializer.errors, status=status.HTTP_400_BAD_REQUEST
+#                     )
+
+#             return Response(serializer.data, status=status.HTTP_200_OK)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#     serializer = ProjectReadSerializer(project)
+#     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])

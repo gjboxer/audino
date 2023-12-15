@@ -67,7 +67,7 @@ export const fetchProjectApi = async ({ id }) => {
 export const updateProjectApi = async ({ params, data }) => {
   try {
     const res = await axios.patch(
-      BASE_URL + `/projects/${params.projectId}`,
+      BASE_URL + `/projects/${params.projectId}/`,
       data,
       {
         params: {
