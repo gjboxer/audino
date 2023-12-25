@@ -954,3 +954,306 @@ class PolicyEnforcer(BasePermission):
         return request.method == 'OPTIONS' \
             or (request.method == 'POST' and view.action == 'metadata' and len(request.data) == 0)
 
+
+
+class LabelPermission(OpenPolicyAgentPermission):
+    obj: Optional[Label]
+
+    class Scopes(StrEnum):
+        LIST = 'list'
+        DELETE = 'delete'
+        UPDATE = 'update'
+        VIEW = 'view'
+
+    @classmethod
+    def create(cls, request, view, obj, iam_context):
+        Scopes = __class__.Scopes
+
+        permissions = []
+        if view.basename == 'label':
+            for scope in cls.get_scopes(request, view, obj):
+                if scope in [Scopes.DELETE, Scopes.UPDATE, Scopes.VIEW]:
+                    obj = cast(Label, obj)
+
+                    # Access rights are the same as in the owning objects
+                    # Job assignees are not supposed to work with separate labels.
+                    # They should only use the list operation.
+                    if obj.project:
+                        if scope == Scopes.VIEW:
+                            owning_perm_scope = ProjectPermission.Scopes.VIEW
+                        else:
+                            owning_perm_scope = ProjectPermission.Scopes.UPDATE_DESC
+
+                        owning_perm = ProjectPermission.create_base_perm(
+                            request, view, owning_perm_scope, iam_context, obj=obj.project
+                        )
+                    else:
+                        if scope == Scopes.VIEW:
+                            owning_perm_scope = TaskPermission.Scopes.VIEW
+                        else:
+                            owning_perm_scope = TaskPermission.Scopes.UPDATE_DESC
+
+                        owning_perm = TaskPermission.create_base_perm(
+                            request, view, owning_perm_scope, iam_context, obj=obj.task,
+                        )
+
+                    # This component doesn't define its own rules for these cases
+                    permissions.append(owning_perm)
+                elif scope == Scopes.LIST and isinstance(obj, Job):
+                    permissions.append(JobPermission.create_base_perm(
+                        request, view, JobPermission.Scopes.VIEW, iam_context, obj=obj,
+                    ))
+                elif scope == Scopes.LIST and isinstance(obj, Task):
+                    permissions.append(TaskPermission.create_base_perm(
+                        request, view, TaskPermission.Scopes.VIEW, iam_context, obj=obj,
+                    ))
+                elif scope == Scopes.LIST and isinstance(obj, Project):
+                    permissions.append(ProjectPermission.create_base_perm(
+                        request, view, ProjectPermission.Scopes.VIEW, iam_context, obj=obj,
+                    ))
+                else:
+                    permissions.append(cls.create_base_perm(request, view, scope, iam_context, obj))
+
+        return permissions
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.url = settings.IAM_OPA_DATA_URL + '/labels/allow'
+
+    @staticmethod
+    def get_scopes(request, view, obj):
+        Scopes = __class__.Scopes
+        return [{
+            'list': Scopes.LIST,
+            'destroy': Scopes.DELETE,
+            'partial_update': Scopes.UPDATE,
+            'retrieve': Scopes.VIEW,
+        }.get(view.action, None)]
+
+    def get_resource(self):
+        data = None
+
+        if self.obj:
+            if self.obj.project:
+                organization = self.obj.project.organization
+            else:
+                organization = self.obj.task.organization
+
+            data = {
+                "id": self.obj.id,
+                'organization': {
+                    "id": getattr(organization, 'id', None)
+                },
+                "task": {
+                    "owner": { "id": getattr(self.obj.task.owner, 'id', None) },
+                    "assignee": { "id": getattr(self.obj.task.assignee, 'id', None) }
+                } if self.obj.task else None,
+                "project": {
+                    "owner": { "id": getattr(self.obj.project.owner, 'id', None) },
+                    "assignee": { "id": getattr(self.obj.project.assignee, 'id', None) }
+                } if self.obj.project else None,
+            }
+
+        return data
+
+
+class JobPermission(OpenPolicyAgentPermission):
+    task_id: Optional[int]
+
+    class Scopes(StrEnum):
+        CREATE = 'create'
+        LIST = 'list'
+        VIEW = 'view'
+        UPDATE = 'update'
+        UPDATE_ASSIGNEE = 'update:assignee'
+        UPDATE_OWNER = 'update:owner'
+        UPDATE_PROJECT = 'update:project'
+        UPDATE_STAGE = 'update:stage'
+        UPDATE_STATE = 'update:state'
+        UPDATE_DESC = 'update:desc'
+        DELETE = 'delete'
+        VIEW_ANNOTATIONS = 'view:annotations'
+        UPDATE_ANNOTATIONS = 'update:annotations'
+        DELETE_ANNOTATIONS = 'delete:annotations'
+        IMPORT_ANNOTATIONS = 'import:annotations'
+        EXPORT_ANNOTATIONS = 'export:annotations'
+        EXPORT_DATASET = 'export:dataset'
+        VIEW_DATA = 'view:data'
+        VIEW_METADATA = 'view:metadata'
+        UPDATE_METADATA = 'update:metadata'
+
+    @classmethod
+    def create(cls, request, view, obj, iam_context):
+        permissions = []
+        if view.basename == 'job':
+            task_id = request.data.get('task_id')
+            for scope in cls.get_scopes(request, view, obj):
+                scope_params = {}
+
+                if scope == __class__.Scopes.CREATE:
+                    scope_params['task_id'] = task_id
+
+                    if task_id:
+                        try:
+                            task = Task.objects.get(id=task_id)
+                        except Task.DoesNotExist as ex:
+                            raise ValidationError(str(ex))
+
+                        iam_context = get_iam_context(request, task)
+                        permissions.append(TaskPermission.create_scope_view(
+                            request, task, iam_context=iam_context
+                        ))
+
+                self = cls.create_base_perm(request, view, scope, iam_context, obj, **scope_params)
+                permissions.append(self)
+
+            if view.action == 'issues':
+                perm = IssuePermission.create_scope_list(request, iam_context)
+                permissions.append(perm)
+
+            assignee_id = request.data.get('assignee')
+            if assignee_id:
+                perm = UserPermission.create_scope_view(iam_context, assignee_id)
+                permissions.append(perm)
+
+            for field_source, field in [
+                # from /annotations and /dataset endpoints
+                (request.query_params, 'cloud_storage_id'),
+            ]:
+                field_path = field.split('.')
+                if cloud_storage_id := _get_key(field_source, field_path):
+                    permissions.append(CloudStoragePermission.create_scope_view(
+                        iam_context, storage_id=cloud_storage_id))
+
+        return permissions
+
+    @classmethod
+    def create_scope_view_data(cls, iam_context, job_id):
+        try:
+            obj = Job.objects.get(id=job_id)
+        except Job.DoesNotExist as ex:
+            raise ValidationError(str(ex))
+        return cls(**iam_context, obj=obj, scope='view:data')
+
+    @classmethod
+    def create_scope_view(cls, iam_context, job_id):
+        try:
+            obj = Job.objects.get(id=job_id)
+        except Job.DoesNotExist as ex:
+            raise ValidationError(str(ex))
+        return cls(**iam_context, obj=obj, scope=__class__.Scopes.VIEW)
+
+    def __init__(self, **kwargs):
+        self.task_id = kwargs.pop('task_id', None)
+        super().__init__(**kwargs)
+        self.url = settings.IAM_OPA_DATA_URL + '/jobs/allow'
+
+    @staticmethod
+    def get_scopes(request, view, obj):
+        Scopes = __class__.Scopes
+        scope = {
+            ('list', 'GET'): Scopes.LIST,
+            ('create', 'POST'): Scopes.CREATE,
+            ('retrieve', 'GET'): Scopes.VIEW,
+            ('partial_update', 'PATCH'): Scopes.UPDATE,
+            ('destroy', 'DELETE'): Scopes.DELETE,
+            ('annotations', 'GET'): Scopes.VIEW_ANNOTATIONS,
+            ('annotations', 'PATCH'): Scopes.UPDATE_ANNOTATIONS,
+            ('annotations', 'DELETE'): Scopes.DELETE_ANNOTATIONS,
+            ('annotations', 'PUT'): Scopes.UPDATE_ANNOTATIONS,
+            ('annotations', 'POST'): Scopes.IMPORT_ANNOTATIONS,
+            ('append_annotations_chunk', 'PATCH'): Scopes.UPDATE_ANNOTATIONS,
+            ('append_annotations_chunk', 'HEAD'): Scopes.UPDATE_ANNOTATIONS,
+            ('data', 'GET'): Scopes.VIEW_DATA,
+            ('metadata','GET'): Scopes.VIEW_METADATA,
+            ('metadata','PATCH'): Scopes.UPDATE_METADATA,
+            ('issues', 'GET'): Scopes.VIEW,
+            ('dataset_export', 'GET'): Scopes.EXPORT_DATASET,
+            ('preview', 'GET'): Scopes.VIEW,
+        }.get((view.action, request.method))
+
+        scopes = []
+        if scope == Scopes.UPDATE:
+            if any(k in request.data for k in ('owner_id', 'owner')):
+                owner_id = request.data.get('owner_id') or request.data.get('owner')
+                if owner_id != getattr(obj.owner, 'id', None):
+                    scopes.append(Scopes.UPDATE_OWNER)
+            if any(k in request.data for k in ('assignee_id', 'assignee')):
+                assignee_id = request.data.get('assignee_id') or request.data.get('assignee')
+                if assignee_id != getattr(obj.assignee, 'id', None):
+                    scopes.append(Scopes.UPDATE_ASSIGNEE)
+            if any(k in request.data for k in ('project_id', 'project')):
+                project_id = request.data.get('project_id') or request.data.get('project')
+                if project_id != getattr(obj.project, 'id', None):
+                    scopes.append(Scopes.UPDATE_PROJECT)
+            if 'stage' in request.data:
+                scopes.append(Scopes.UPDATE_STAGE)
+            if 'state' in request.data:
+                scopes.append(Scopes.UPDATE_STATE)
+
+            if any(k in request.data for k in ('name', 'labels', 'bug_tracker', 'subset')):
+                scopes.append(Scopes.UPDATE_DESC)
+        elif scope == Scopes.VIEW_ANNOTATIONS:
+            if 'format' in request.query_params:
+                scope = Scopes.EXPORT_ANNOTATIONS
+
+            scopes.append(scope)
+        elif scope == Scopes.UPDATE_ANNOTATIONS:
+            if 'format' in request.query_params and request.method == 'PUT':
+                scope = Scopes.IMPORT_ANNOTATIONS
+
+            scopes.append(scope)
+        else:
+            scopes.append(scope)
+
+        return scopes
+
+    def get_resource(self):
+        data = None
+        if self.obj:
+            print("inside get_resource of job permission",vars(self.obj))
+            if self.obj.task_id.project:
+                organization = self.obj.task_id.project.organization
+            else:
+                organization = self.obj.task_id.organization
+
+            data = {
+                "id": self.obj.id,
+                "assignee": { "id": getattr(self.obj.assignee, 'id', None) },
+                'organization': {
+                    "id": getattr(organization, 'id', None)
+                },
+                "task": {
+                    "owner": { "id": getattr(self.obj.task_id.owner, 'id', None) },
+                    "assignee": { "id": getattr(self.obj.task_id.assignee, 'id', None) }
+                },
+                "project": {
+                    "owner": { "id": getattr(self.obj.task_id.project.owner, 'id', None) },
+                    "assignee": { "id": getattr(self.obj.task_id.project.assignee, 'id', None) }
+                } if self.obj.task_id.project else None
+            }
+        elif self.scope == __class__.Scopes.CREATE:
+            if self.task_id is None:
+                raise ValidationError("task_id is not specified")
+            task = Task.objects.get(id=self.task_id)
+
+            if task.project:
+                organization = task.project.organization
+            else:
+                organization = task.organization
+
+            data = {
+                'organization': {
+                    "id": getattr(organization, 'id', None)
+                },
+                "task": {
+                    "owner": { "id": getattr(task.owner, 'id', None) },
+                    "assignee": { "id": getattr(task.assignee, 'id', None) }
+                },
+                "project": {
+                    "owner": { "id": getattr(task.project.owner, 'id', None) },
+                    "assignee": { "id": getattr(task.project.assignee, 'id', None) }
+                } if task.project else None
+            }
+
+        return data

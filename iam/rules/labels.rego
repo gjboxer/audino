@@ -73,10 +73,10 @@ filter := [] { # Django Q object to filter list of entries
     utils.is_sandbox
     user := input.auth.user
     qobject := [
-        {"task__owner_id": user.id},
-        {"task__assignee_id": user.id}, "|",
-        {"project__owner_id": user.id}, "|",
-        {"project__assignee_id": user.id}, "|",
+        {"task__owner": user.id},
+        {"task__assignee": user.id}, "|",
+        {"project__owner": user.id}, "|",
+        {"project__assignee": user.id}, "|",
     ]
 } else := qobject {
     utils.is_organization
@@ -91,9 +91,9 @@ filter := [] { # Django Q object to filter list of entries
     organizations.has_perm(organizations.WORKER)
     user := input.auth.user
     qobject := [
-        {"task__owner_id": user.id},
-        {"task__assignee_id": user.id}, "|",
-        {"project__owner_id": user.id}, "|",
-        {"project__assignee_id": user.id}, "|",
+        {"task__owner": user.id},
+        {"task__assignee": user.id}, "|",
+        {"project__owner": user.id}, "|",
+        {"project__assignee": user.id}, "|",
     ]
 }

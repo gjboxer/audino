@@ -19,7 +19,7 @@ class Storage(models.Model):
 
     def __str__(self) -> str:
         return str(self.location)
-
+        
 
 class Project(models.Model):
     name = models.CharField(max_length=255)
@@ -43,46 +43,8 @@ class Project(models.Model):
     def __str__(self):
         return self.name
 
-
-class Label(models.Model):
-    LABEL_TYPE_CHOICES = (("any", "any"),)
-    project = models.ForeignKey(
-        Project,
-        verbose_name="Projects",
-        on_delete=models.CASCADE,
-        null=True,
-        related_name="labels",
-    )
-    name = models.CharField(max_length=65, blank=True, null=True)
-    # color = models.CharField(max_length=20, default='#FF0000')
-    attributes = models.ManyToManyField(
-        "Attribute", default=None, related_name="labels", blank=True
-    )
-    label_type = models.CharField(
-        max_length=255, choices=LABEL_TYPE_CHOICES, default="any"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return str(self.id)
-
-
-class Attribute(models.Model):
-    INPUT_CHOICES = (("select", "select"), ("radio", "radio"))
-    label = models.ForeignKey(
-        Label, on_delete=models.CASCADE, default=None, null=True)
-    name = models.CharField(max_length=255, blank=True, null=True)
-    mutable = models.BooleanField(default=False)
-    input_type = models.CharField(
-        max_length=10, choices=INPUT_CHOICES, default="select"
-    )
-    default_value = models.CharField(
-        max_length=20, default="", blank=True, null=True)
-    values = models.CharField(null=True, blank=True)
-
-    def __str__(self):
-        return str(self.id)
+    def get_labels(self):
+        return self.labels.filter(project=self.id)
 
 
 class Task(models.Model):
@@ -92,18 +54,15 @@ class Task(models.Model):
         ("Validation", "Validation"),
     )
     name = models.CharField(max_length=200, null=True, blank=True)
-    project = models.ForeignKey(Project, on_delete=models.CASCADE, null=True,related_name="tasks",
-        related_query_name="task")
-    owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True,related_name="owners")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, null=True, related_name="tasks",
+                                related_query_name="task")
+    owner = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name="owners")
     subset = models.CharField(
         max_length=64, choices=SUBSET_CHOICES, default="train")
-    assignee = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="task_assignee",
-    )
-    labels = models.ManyToManyField(Label, default=None, blank=True)
+    assignee = models.ForeignKey(User, null=True,  blank=True,
+                                 on_delete=models.SET_NULL, related_name="assignees")
+    # labels = models.ManyToManyField(Label, default=None, blank=True)
     source_storage = models.ForeignKey(
         Storage,
         on_delete=models.CASCADE,
@@ -124,6 +83,62 @@ class Task(models.Model):
     def __str__(self):
         return self.name
 
+    def get_labels(self):
+        project = self.project
+        if project:
+            return project.get_labels()
+        return self.label
+
+
+class Label(models.Model):
+    LABEL_TYPE_CHOICES = (("any", "any"),)
+    project = models.ForeignKey(
+        Project,
+        verbose_name="Projects",
+        on_delete=models.CASCADE,
+        null=True,
+        related_name="labels",
+    )
+    name = models.CharField(max_length=65, blank=True, null=True)
+    # color = models.CharField(max_length=20, default='#FF0000')
+    attributes = models.ManyToManyField(
+        "Attribute", default=None, related_name="labels", blank=True
+    )
+    label_type = models.CharField(
+        max_length=255, choices=LABEL_TYPE_CHOICES, default="any"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    task = models.ForeignKey(
+        Task, null=True, blank=True, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return str(self.id)
+
+    @property
+    def organization_id(self):
+        if self.project is not None:
+            return self.project.organization_id
+        if self.task is not None:
+            return self.task.organization_id
+        return None
+
+
+class Attribute(models.Model):
+    INPUT_CHOICES = (("select", "select"), ("radio", "radio"))
+    label = models.ForeignKey(
+        Label, on_delete=models.CASCADE, default=None, null=True)
+    name = models.CharField(max_length=255, blank=True, null=True)
+    mutable = models.BooleanField(default=False)
+    input_type = models.CharField(
+        max_length=10, choices=INPUT_CHOICES, default="select"
+    )
+    default_value = models.CharField(
+        max_length=20, default="", blank=True, null=True)
+    values = models.CharField(null=True, blank=True)
+
+    def __str__(self):
+        return str(self.id)
 
 class Data(models.Model):
     task = models.ForeignKey(
@@ -176,6 +191,14 @@ class Job(models.Model):
 
     def __str__(self):
         return str(self.id)
+
+    def get_labels(self):
+        project = self.task_id.project
+        return project.get_labels() if project else task.get_labels()
+
+    @property
+    def organization_id(self):
+        return self.task_id.organization_id
 
 
 class AnnotationAttribute(models.Model):
