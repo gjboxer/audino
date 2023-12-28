@@ -7,7 +7,8 @@ from .models import *
 from rest_framework.permissions import SAFE_METHODS
 import ast
 from django.contrib.auth import get_user_model
-
+from iam.permissions import *
+from .models import StageChoice, StateChoice, StatusChoice
 
 class AttributeSerializer(serializers.ModelSerializer):
     # values = serializers.CharField(max_length=4096, allow_blank=True)
@@ -366,27 +367,74 @@ class GetTaskSerializer(serializers.ModelSerializer):
         }
 
 
-class PostJobSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Job
-        fields = "__all__"
-
 
 class GetJobSerializer(serializers.ModelSerializer):
     assignee = UserSerializer()
+    organization = serializers.ReadOnlyField(
+        source='task_id.organization.id', allow_null=True)
     task = serializers.SerializerMethodField()
-    # task_id = GetTaskSerializer()
 
     class Meta:
         model = Job
         # fields = '__all__'
         exclude = ["task_id"]
-
+    
     def get_task(self, obj):
         if obj.task_id:
             task_serializer = GetTaskSerializer(obj.task_id)
             return task_serializer.data
         return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+    
+        if request := self.context.get('request'):
+            perm = TaskPermission.create_scope_view(
+                request, instance.task_id)
+            result = perm.check_access()
+            if result.allow:
+                if task_source_storage := instance.get_source_storage():
+                    data['source_storage'] = StorageSerializer(
+                        task_source_storage).data
+                if task_target_storage := instance.get_target_storage():
+                    data['target_storage'] = StorageSerializer(
+                        task_target_storage).data
+
+        return data
+
+
+class PostJobSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Job
+        fields = "__all__"
+
+    def to_representation(self, instance):
+        serializer = GetJobSerializer(instance, context=self.context)
+        return serializer.data
+
+    def update(self, instance, validated_data):
+        state = validated_data.get('state')
+        stage = validated_data.get('stage')
+        if stage:
+            if stage == StageChoice.ANNOTATION:
+                status = StatusChoice.ANNOTATION
+            elif stage ==StageChoice.ACCEPTANCE and state == StateChoice.COMPLETED:
+                status = StatusChoice.COMPLETED
+            else:
+                status = StatusChoice.VALIDATION
+
+            validated_data['status'] = status
+            if stage != instance.stage and not state:
+                validated_data['state'] = StateChoice.NEW
+
+        assignee = validated_data.get('assignee')
+        if assignee is not None:
+            validated_data['assignee'] = assignee
+
+        instance = super().update(instance, validated_data)
+
+        return instance
 
 
 class AnnotationAttributeSerializer(serializers.ModelSerializer):

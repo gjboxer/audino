@@ -3,12 +3,50 @@ import os
 from django.db import models
 from users.models import User
 from django.utils.text import slugify
+from enum import Enum
 from organizations.models import Organization
-
+from typing import Any, Dict, Optional, Sequence
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, models, transaction
 
 def get_upload_path(instance, filename):
     return os.path.join("%s" % instance.task.name, filename)
 
+class StageChoice(str, Enum):
+    ANNOTATION = 'annotation'
+    VALIDATION = 'validation'
+    ACCEPTANCE = 'acceptance'
+
+    @classmethod
+    def choices(cls):
+        return tuple((x.value, x.name) for x in cls)
+
+    def __str__(self):
+        return self.value
+
+class StateChoice(str, Enum):
+    NEW = 'new'
+    IN_PROGRESS = 'in progress'
+    COMPLETED = 'completed'
+    REJECTED = 'rejected'
+
+    @classmethod
+    def choices(cls):
+        return tuple((x.value, x.name) for x in cls)
+
+    def __str__(self):
+        return self.value
+
+class JobType(str, Enum):
+    ANNOTATION = 'annotation'
+    GROUND_TRUTH = 'ground_truth'
+
+    @classmethod
+    def choices(cls):
+        return tuple((x.value, x.name) for x in cls)
+
+    def __str__(self):
+        return self.value
 
 class Storage(models.Model):
     STORAGE_CHOICES = (("local", "local"), ("cloud", "cloud"))
@@ -156,19 +194,36 @@ class Data(models.Model):
     def __str__(self):
         return self.filename
 
+class JobType(str, Enum):
+    ANNOTATION = 'annotation'
+    GROUND_TRUTH = 'ground_truth'
+
+    @classmethod
+    def choices(cls):
+        return tuple((x.value, x.name) for x in cls)
+
+    def __str__(self):
+        return self.value
+
+class StatusChoice(str, Enum):
+    """Deprecated. Use StageChoice and StateChoice instead"""
+
+    ANNOTATION = 'annotation'
+    VALIDATION = 'validation'
+    COMPLETED = 'completed'
+
+    @classmethod
+    def choices(cls):
+        return tuple((x.value, x.name) for x in cls)
+
+    @classmethod
+    def list(cls):
+        return list(map(lambda x: x.value, cls))
+
+    def __str__(self):
+        return self.value
 
 class Job(models.Model):
-    STATE_CHOICES = (
-        ("new", "new"),
-        ("in_progress", "in_progress"),
-        ("completed", "completed"),
-        ("rejected", "rejected"),
-    )
-    STAGE_CHOICES = (
-        ("annotation", "annotation"),
-        ("validation", "validation"),
-        ("acceptance", "acceptance"),
-    )
     task_id = models.ForeignKey(Task, on_delete=models.CASCADE, null=True)
     project_id = models.ForeignKey(
         Project, on_delete=models.CASCADE, null=True)
@@ -181,24 +236,46 @@ class Job(models.Model):
     guide_id = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, related_name="guide"
     )
-    state = models.CharField(
-        max_length=100, choices=STATE_CHOICES, default="new")
-    stage = models.CharField(
-        max_length=100, choices=STAGE_CHOICES, default="annotation"
-    )
+    stage = models.CharField(max_length=32, choices=StageChoice.choices(),
+        default=StageChoice.ANNOTATION)
+    state = models.CharField(max_length=32, choices=StateChoice.choices(),
+        default=StateChoice.NEW)
+    status = models.CharField(max_length=32, choices=StatusChoice.choices(),
+        default=StatusChoice.ANNOTATION)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    type = models.CharField(max_length=32, choices=JobType.choices(),
+        default=JobType.ANNOTATION)
+    
+    def get_target_storage(self) -> Optional[Storage]:
+        return self.task_id.target_storage
 
-    def __str__(self):
-        return str(self.id)
+    def get_source_storage(self) -> Optional[Storage]:
+        return self.task_id.source_storage
+    
+    class Meta:
+        default_permissions = ()
+
+    @transaction.atomic
+    def save(self, *args, **kwargs) -> None:
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def get_labels(self):
+        task=self.task_id
         project = self.task_id.project
         return project.get_labels() if project else task.get_labels()
 
     @property
     def organization_id(self):
         return self.task_id.organization_id
+    
+    def get_organization_slug(self):
+        return self.task_id.organization.slug
+
+    def delete(self, using=None, keep_parents=False):
+        super().delete(using, keep_parents)
+
 
 
 class AnnotationAttribute(models.Model):

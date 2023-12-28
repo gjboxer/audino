@@ -22,7 +22,23 @@ class StrEnum(str, Enum):
     def __str__(self) -> str:
         return self.value
 
+def _get_key(d: Dict[str, Any], key_path: Union[str, Sequence[str]]) -> Optional[Any]:
+    """
+    Like dict.get(), but supports nested fields. If the field is missing, returns None.
+    """
 
+    if isinstance(key_path, str):
+        key_path = [key_path]
+    else:
+        assert key_path
+
+    for key_part in key_path:
+        d = d.get(key_part)
+        if d is None:
+            return d
+
+    return d
+    
 @define
 class PermissionResult:
     allow: bool
@@ -1013,7 +1029,7 @@ class LabelPermission(OpenPolicyAgentPermission):
                     ))
                 else:
                     permissions.append(cls.create_base_perm(request, view, scope, iam_context, obj))
-
+            # print(permissions[0].payload)
         return permissions
 
     def __init__(self, **kwargs):
