@@ -253,8 +253,6 @@ class Job(models.Model):
     def get_source_storage(self) -> Optional[Storage]:
         return self.task_id.source_storage
     
-    class Meta:
-        default_permissions = ()
 
     @transaction.atomic
     def save(self, *args, **kwargs) -> None:
@@ -273,9 +271,15 @@ class Job(models.Model):
     def get_organization_slug(self):
         return self.task_id.organization.slug
 
+    def get_task_id(self):
+        task = self.task_id
+        return task.id if task else None
+
     def delete(self, using=None, keep_parents=False):
         super().delete(using, keep_parents)
 
+    class Meta:
+        default_permissions = ()
 
 
 class AnnotationAttribute(models.Model):

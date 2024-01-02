@@ -378,7 +378,7 @@ class GetJobSerializer(serializers.ModelSerializer):
         model = Job
         # fields = '__all__'
         exclude = ["task_id"]
-    
+
     def get_task(self, obj):
         if obj.task_id:
             task_serializer = GetTaskSerializer(obj.task_id)
@@ -404,6 +404,9 @@ class GetJobSerializer(serializers.ModelSerializer):
 
 
 class PostJobSerializer(serializers.ModelSerializer):
+    assignee = serializers.IntegerField(allow_null=True, required=False)
+    type = serializers.ChoiceField(choices=JobType.choices())
+    task_id = serializers.IntegerField()
 
     class Meta:
         model = Job

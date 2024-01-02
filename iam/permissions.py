@@ -928,8 +928,6 @@ class WebhookPermission(OpenPolicyAgentPermission):
 
         return data
 
-
-
 class PolicyEnforcer(BasePermission):
     # pylint: disable=no-self-use
     def check_permission(self, request, view, obj):
@@ -969,8 +967,6 @@ class PolicyEnforcer(BasePermission):
  
         return request.method == 'OPTIONS' \
             or (request.method == 'POST' and view.action == 'metadata' and len(request.data) == 0)
-
-
 
 class LabelPermission(OpenPolicyAgentPermission):
     obj: Optional[Label]
@@ -1072,7 +1068,6 @@ class LabelPermission(OpenPolicyAgentPermission):
 
         return data
 
-
 class JobPermission(OpenPolicyAgentPermission):
     task_id: Optional[int]
 
@@ -1122,10 +1117,6 @@ class JobPermission(OpenPolicyAgentPermission):
 
                 self = cls.create_base_perm(request, view, scope, iam_context, obj, **scope_params)
                 permissions.append(self)
-
-            if view.action == 'issues':
-                perm = IssuePermission.create_scope_list(request, iam_context)
-                permissions.append(perm)
 
             assignee_id = request.data.get('assignee')
             if assignee_id:
@@ -1227,7 +1218,6 @@ class JobPermission(OpenPolicyAgentPermission):
     def get_resource(self):
         data = None
         if self.obj:
-            print("inside get_resource of job permission",vars(self.obj))
             if self.obj.task_id.project:
                 organization = self.obj.task_id.project.organization
             else:
