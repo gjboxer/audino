@@ -57,7 +57,6 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
 
         serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
 
-
 class LabelViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                    mixins.RetrieveModelMixin, mixins.DestroyModelMixin, PartialUpdateModelMixin
                    ):
@@ -158,83 +157,6 @@ class LabelViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
 
         return super().perform_destroy(instance)
 
-# @api_view(["GET", "POST"])
-# @authentication_classes([TokenAuthentication])
-# @permission_classes([IsAuthenticated])
-# def jobs(request, format=None):
-#     if request.method == "POST":
-#         job_serializer = PostJobSerializer(data=request.data)
-#         if job_serializer.is_valid():
-#             job_serializer.save()
-#             return Response(job_serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(job_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     search_query = request.GET.get("search", None)
-#     page = request.GET.get("page", 1)
-#     page_size = request.GET.get("page_size", 10)
-
-#     organization = request.iam_context['organization']
-#     if organization:
-#         try:
-#             jobs = JobModel.objects.filter(
-#                 Q(project_id__organization__slug=organization.slug) &
-#                 (Q(guide_id=request.user) | Q(assignee=request.user))
-#             ).order_by("created_at")
-
-#             # not using JobPermission as it is not working
-#             # perm = JobPermission.create_scope_list(request)
-#             # jobs = perm.filter(jobs)
-#         except Organization.DoesNotExist:
-#             return Response(
-#                 {"message": "Organization does not exist."},
-#                 status=status.HTTP_404_NOT_FOUND,
-#             )
-
-#     else:
-#         jobs = JobModel.objects.filter(Q(task_id__project_id__organization__isnull=True) &
-#                                        (Q(guide_id=request.user) |
-#                                         Q(assignee=request.user))
-#                                        ).order_by("created_at")
-#     # not using JobPermission as it is not working
-#     # perm = JobPermission.create_scope_list(request)
-#     # jobs = perm.filter(jobs)
-
-#     if search_query:
-#         jobs = jobs.filter(Q(task_id__name__icontains=search_query))
-
-#     paginator = get_paginator(page, page_size)
-#     result = paginator.paginate_queryset(jobs, request)
-#     serializer = GetJobSerializer(result, many=True)
-#     return paginator.get_paginated_response(serializer.data)
-
-
-# @api_view(["GET", "DELETE", "PATCH"])
-# @authentication_classes([TokenAuthentication])
-# @permission_classes([IsAuthenticated])
-# def get_job_by_id(request, job_id, format=None):
-#     try:
-#         job = JobModel.objects.get(id=job_id)
-#     except JobModel.DoesNotExist:
-#         return Response(
-#             {"message": "Job does not exists."}, status=status.HTTP_404_NOT_FOUND
-#         )
-
-#     if request.method == "DELETE":
-#         serializer = GetJobSerializer(job)
-#         job.delete()
-#         return Response(serializer.data, status=status.HTTP_200_OK)
-
-#     if request.method == "PATCH":
-#         data = JSONParser().parse(request)
-#         serializer = PostJobSerializer(job, data=data)
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     serializer = GetJobSerializer(job)
-#     return Response(serializer.data, status=status.HTTP_200_OK)
-
 class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateModelMixin,
                  mixins.RetrieveModelMixin, PartialUpdateModelMixin, mixins.DestroyModelMixin
                  ):
@@ -283,7 +205,6 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateMo
             raise ValidationError("Only ground truth jobs can be removed")
 
         return super().perform_destroy(instance)
-
 
 class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                   mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin,
@@ -370,7 +291,6 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         job_serializer.save()
         serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
 
-
 @api_view(["GET", "POST", "DELETE"])
 @parser_classes([MultiPartParser])
 @authentication_classes([TokenAuthentication])
@@ -407,140 +327,50 @@ def add_data(request, task_id, format=None):
     serializer = DataSerializer(task_data)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
-
-@api_view(["GET", "POST"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def job_annotation(request, job_id, format=None):
-    if request.method == "POST" and JobModel.objects.filter(id=job_id).exists():
-        data = JSONParser().parse(request)
-        data["job"] = job_id
-
-        serializer = PostAnnotationSerializer(data=data)
-        if serializer.is_valid():
+class JobAnnotationViewSet(viewsets.ViewSet):
+    def create(self, request, job_id):
+        if JobModel.objects.filter(id=job_id).exists():
+            data = self.request.data
+            data["job"] = job_id
+            serializer = PostAnnotationSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
             annotation_obj = serializer.save()
+
             for each_label in data["label"]:
                 ann_data = {
                     "label": each_label["id"],
                     "name": LabelModel.objects.get(id=each_label["id"]).name,
                 }
                 ann_data_serializer = AnnotationDataSerializer(data=ann_data)
-                if ann_data_serializer.is_valid():
-                    ann_obj = ann_data_serializer.save()
-                    annotation_obj.labels.add(ann_obj)
-
-                    for each_attri in each_label["attributes"]:
-                        ann_attribute_data = {
-                            "attribute": each_attri["id"],
-                            "values": str(each_attri["values"]),
-                        }
-                        ann_attribute_serializer = AnnotationAttributeSerializer(
-                            data=ann_attribute_data
-                        )
-                        if ann_attribute_serializer.is_valid():
-                            ann_att_obj = ann_attribute_serializer.save()
-                            ann_obj.attributes.add(ann_att_obj)
-                        else:
-                            return Response(
-                                ann_attribute_serializer.errors,
-                                status=status.HTTP_400_BAD_REQUEST,
-                            )
-                else:
-                    return Response(
-                        ann_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST
+                ann_data_serializer.is_valid(raise_exception=True)
+                ann_obj = ann_data_serializer.save()
+                annotation_obj.labels.add(ann_obj)
+                for each_attri in each_label["attributes"]:
+                    ann_attribute_data = {
+                        "attribute": each_attri["id"],
+                        "values": str(each_attri["values"]),
+                    }
+                    ann_attribute_serializer = AnnotationAttributeSerializer(
+                        data=ann_attribute_data
                     )
+                    ann_attribute_serializer.is_valid(raise_exception=True)
+                    ann_att_obj = ann_attribute_serializer.save()
+                    ann_obj.attributes.add(ann_att_obj)
 
             final_data = dict(GetAnnotationSerializer(annotation_obj).data)
             final_data = convert_string_lists_to_lists(final_data)
             return Response(final_data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+    def list(self, request, job_id):
+        annotations = AnnotationModel.objects.filter(job=job_id)
+        if len(annotations) == 0:
+            return Response([], status=status.HTTP_200_OK)
 
-    annotations = AnnotationModel.objects.filter(job=job_id)
-    if len(annotations) == 0:
-        return Response([], status=status.HTTP_200_OK)
+        serializer = GetAnnotationSerializer(annotations, many=True)
+        temp_serializer = convert_string_lists_to_lists(serializer.data)
+        return Response(temp_serializer, status=status.HTTP_200_OK)
 
-    serializer = GetAnnotationSerializer(annotations, many=True)
-    temp_serializer = convert_string_lists_to_lists(serializer.data)
-    return Response(temp_serializer, status=status.HTTP_200_OK)
-
-
-# @api_view(["GET", "DELETE", "PATCH"])
-# @authentication_classes([TokenAuthentication])
-# @permission_classes([IsAuthenticated])
-# def annotations(request, job_id, a_id, format=None):
-#     try:
-#         annotation = AnnotationModel.objects.get(id=a_id)
-#     except AnnotationModel.DoesNotExist:
-#         return Response(
-#             {"message": "Annotation with given Id does not exist."},
-#             status=status.HTTP_404_NOT_FOUND,
-#         )
-
-#     if request.method == "DELETE":
-#         annotation.delete()
-#         return Response(
-#             {"message": f"Annotation with {a_id} deleted successfully"},
-#             status=status.HTTP_200_OK,
-#         )
-
-#     if request.method == "PATCH":
-#         data = JSONParser().parse(request)
-
-#         labels = annotation.labels.values()
-#         for each_label in labels:
-#             label_obj = AnnotationDataModel.objects.get(id=each_label['id'])
-#             for each_annotation in label_obj.attributes.values():
-#                 AnnotationAttributeModel.objects.get(
-#                     id=each_annotation['id']).delete()
-
-#             label_obj.delete()
-
-#         serializer = PostAnnotationSerializer(annotation, data=data)
-#         if serializer.is_valid():
-#             ann = serializer.save()
-#             for each_label in data["label"]:
-#                 ann_data = {
-#                     "label": each_label["id"],
-#                     "name": LabelModel.objects.get(id=each_label["id"]).name,
-#                 }
-#                 ann_data_serializer = AnnotationDataSerializer(data=ann_data)
-#                 if ann_data_serializer.is_valid():
-#                     ann_obj = ann_data_serializer.save()
-#                     ann.labels.add(ann_obj)
-
-#                     for each_attri in each_label["attributes"]:
-#                         ann_attribute_data = {
-#                             "attribute": each_attri["id"],
-#                             "values": str(each_attri["values"]),
-#                         }
-#                         ann_attribute_serializer = AnnotationAttributeSerializer(
-#                             data=ann_attribute_data
-#                         )
-#                         if ann_attribute_serializer.is_valid():
-#                             ann_att_obj = ann_attribute_serializer.save()
-#                             ann_obj.attributes.add(ann_att_obj)
-#                         else:
-#                             return Response(
-#                                 ann_attribute_serializer.errors,
-#                                 status=status.HTTP_400_BAD_REQUEST,
-#                             )
-#                 else:
-#                     return Response(
-#                         ann_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST
-#                     )
-
-#             final_data = dict(GetAnnotationSerializer(ann).data)
-#             final_data = convert_string_lists_to_lists(final_data)
-#             return Response(final_data, status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     final_data = dict(GetAnnotationSerializer(annotation).data)
-#     final_data = convert_string_lists_to_lists(final_data)
-#     return Response(final_data, status=status.HTTP_200_OK)
-
-
-class AnnotationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateModelMixin,
-                 mixins.RetrieveModelMixin, mixins.DestroyModelMixin):
+class AnnotationViewSet(viewsets.ViewSet):
     queryset = AnnotationModel.objects.all()
     search_fields = ('job__id', 'id')
     filter_fields = list(search_fields) + ['id', 'job_id']
@@ -557,9 +387,9 @@ class AnnotationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.C
                 f"Annotation with given ID {a_id} does not exist.",
                 code=status.HTTP_404_NOT_FOUND,
             )
-    
+
     def get_serializer_class(self):
-        if self.request.method in SAFE_METHODS:
+        if self.action == 'list':
             return GetAnnotationSerializer
         else:
             return PostAnnotationSerializer
@@ -576,7 +406,7 @@ class AnnotationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.C
         serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
 
     @transaction.atomic
-    def perform_update(self, serializer,job_id,a_id):
+    def perform_update(self, serializer, job_id, a_id):
         data = self.request.data
         annotation = self.get_object_or_404(a_id)
 
@@ -619,7 +449,7 @@ class AnnotationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.C
         return Response(final_data, status=status.HTTP_200_OK)
 
     @transaction.atomic
-    def perform_destroy(self, instance,a_id,job_id):
+    def perform_destroy(self, instance, a_id, job_id):
         annotation = self.get_object_or_404(a_id)
         annotation.delete()
         return Response(
