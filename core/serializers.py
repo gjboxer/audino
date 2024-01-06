@@ -404,9 +404,7 @@ class GetJobSerializer(serializers.ModelSerializer):
 
 
 class PostJobSerializer(serializers.ModelSerializer):
-    assignee = serializers.IntegerField(allow_null=True, required=False)
     type = serializers.ChoiceField(choices=JobType.choices())
-    task_id = serializers.IntegerField()
 
     class Meta:
         model = Job
