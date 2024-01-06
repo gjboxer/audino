@@ -9,6 +9,7 @@ class IAMConfig(AppConfig):
 
     def ready(self):
         from .signals import register_signals
+        from .signals import password_reset_token_created
         register_signals(self)
 
         if strtobool(os.environ.get("IAM_OPA_BUNDLE", '0')):

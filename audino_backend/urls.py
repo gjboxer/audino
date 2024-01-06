@@ -29,7 +29,7 @@ urlpatterns = [
     path("api/", include("core.urls")),
     path("api/", include("users.urls")),
     path("api/", include("organizations.urls")),
-    path('api/auth/', include("iam.urls")),
+    path('api/', include("iam.urls")),
     # path("__debug__/", include("debug_toolbar.urls")),
 ]
 

@@ -36,6 +36,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://*"
 ]
 CORS_ALLOWED_HEADERS = ['*']
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -43,41 +44,104 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "corsheaders",
+    "dj_rest_auth",
+    'dj_rest_auth.registration',
+    'django_filters',
     "rest_framework",
     "rest_framework.authtoken",
+    'drf_spectacular',
+    'django.contrib.sites',
+    'django_rest_passwordreset',
+    'allauth',
+    "corsheaders",
     "users",
     "core",
     "organizations",
-    'allauth',
     'iam',
     'engine',
     # "debug_toolbar",
-    'django_filters',
 ]
+SITE_ID = 1
+
+REST_FRAMEWORK = {
+    "DEFAULT_PARSER_CLASSES": [
+        "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
+    # 'DEFAULT_RENDERER_CLASSES': [
+    #     # 'cvat.apps.engine.renderers.CVATAPIRenderer',
+    #     'rest_framework.renderers.BrowsableAPIRenderer',
+    # ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        'iam.permissions.PolicyEnforcer',
+    ],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["users.manager.TokenAuthentication", 'rest_framework.authentication.SessionAuthentication',
+                                       'rest_framework.authentication.BasicAuthentication'],
+    'DEFAULT_PAGINATION_CLASS':
+        'engine.pagination.CustomPagination',
+    'PAGE_SIZE': 10,
+    'DEFAULT_FILTER_BACKENDS': (
+        'engine.filters.SimpleFilter',
+        'engine.filters.SearchFilter',
+        'engine.filters.OrderingFilter',
+        'engine.filters.JsonLogicFilter',
+        'iam.filters.OrganizationFilterBackend',
+    ),
+    'SEARCH_PARAM': 'search',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/minute',
+    },
+    'DEFAULT_SCHEMA_CLASS': 'iam.schema.CustomAutoSchema',
+}
+
+REST_AUTH_SERIALIZERS = {
+    # 'LOGIN_SERIALIZER': 'cvat.apps.iam.serializers.LoginSerializerEx',
+    'PASSWORD_RESET_SERIALIZER': 'iam.serializers.PasswordResetSerializerEx',
+}
+
+REST_AUTH = {
+    'OLD_PASSWORD_FIELD_ENABLED': True,
+    'LOGOUT_ON_PASSWORD_CHANGE': True,
+}
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    'django.middleware.gzip.GZipMiddleware',
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    'django.middleware.gzip.GZipMiddleware',
+    # 'crum.CurrentRequestUserMiddleware',
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # "allauth.account.middleware.AccountMiddleware",
+    'dj_pagination.middleware.PaginationMiddleware',
     "iam.views.ContextMiddleware",
     # "debug_toolbar.middleware.DebugToolbarMiddleware",
 ]
+UI_URL = ''
+
+STATICFILES_FINDERS = [
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+    'compressor.finders.CompressorFinder',
+]
+
+ROOT_URLCONF = "audino_backend.urls"
 
 INTERNAL_IPS = {"127.0.0.1"}
 
-ROOT_URLCONF = "audino_backend.urls"
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR, 'templates/',],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -90,62 +154,36 @@ TEMPLATES = [
     },
 ]
 
+
+# IAM SETTINGS
+IAM_TYPE = 'BASIC'
+IAM_BASE_EXCEPTION = None  # a class which will be used by IAM to report errors
+
+
+def GET_IAM_DEFAULT_ROLES(user) -> list:
+    return ['user']
+
+
+IAM_ADMIN_ROLE = 'admin'
+IAM_ROLES = [IAM_ADMIN_ROLE, 'business', 'user', 'worker']
+IAM_OPA_HOST = 'http://localhost:8181'
+IAM_OPA_DATA_URL = f'{IAM_OPA_HOST}/v1/data'
+LOGIN_URL = 'rest_login'
+LOGIN_REDIRECT_URL = '/'
+
+OBJECTS_NOT_RELATED_WITH_ORG = ['user', 'function', 'request', 'server',]
+IAM_CONTEXT_BUILDERS = ['iam.utils.build_iam_context',]
+
+# ORG SETTINGS
+ORG_INVITATION_CONFIRM = 'No'  # automatically accept invitations
+ORG_INVITATION_EXPIRY_DAYS = 7
+
 AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",
                            'allauth.account.auth_backends.AuthenticationBackend',)
 
-
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = True
-ACCOUNT_AUTHENTICATION_METHOD = "email"
-
-AUTH_USER_MODEL = "users.User"
-WSGI_APPLICATION = "audino_backend.wsgi.application"
-
-REST_FRAMEWORK = {
-    "DEFAULT_PARSER_CLASSES": [
-        "rest_framework.parsers.JSONParser",
-        "rest_framework.parsers.FormParser",
-        "rest_framework.parsers.MultiPartParser",
-    ],
-    "DEFAULT_AUTHENTICATION_CLASSES": ["users.manager.TokenAuthentication"],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-        'iam.permissions.PolicyEnforcer',
-    ],
-    'DEFAULT_FILTER_BACKENDS': (
-        'engine.filters.SimpleFilter',
-        'engine.filters.SearchFilter',
-        'engine.filters.OrderingFilter',
-        'engine.filters.JsonLogicFilter',
-        'iam.filters.OrganizationFilterBackend',
-    ),
-    'SEARCH_PARAM': 'search',
-    'DEFAULT_PAGINATION_CLASS':
-        'engine.pagination.CustomPagination',
-    'PAGE_SIZE': 10,
-    'DEFAULT_SCHEMA_CLASS': 'iam.schema.CustomAutoSchema',
-}
-
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
-
-DATABASES = {
-    # "default": {
-    #     "ENGINE": "django.db.backends.sqlite3",
-    #     "NAME": BASE_DIR / "db.sqlite3",
-    # }
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB'),
-        'USER': os.environ.get("POSTGRES_USER"),
-        'PASSWORD': os.environ.get("POSTGRES_PASSWORD"),
-        'HOST': os.environ.get("POSTGRES_HOST"),
-        'PORT': os.environ.get("POSTGRES_PORT"),
-    }
-}
-
-# Password validation
-# https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
+# https://github.com/pennersr/django-allauth
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+ACCOUNT_AUTHENTICATION_METHOD = 'username_email'
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -162,7 +200,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
@@ -174,7 +211,6 @@ USE_I18N = True
 
 USE_TZ = True
 
-
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
@@ -184,43 +220,47 @@ STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 os.makedirs(STATIC_ROOT, exist_ok=True)
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
-
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
 # Media Handling Configuration
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-# ORG SETTINGS
-ORG_INVITATION_CONFIRM = 'No'  # automatically accept invitations
-ORG_INVITATION_EXPIRY_DAYS = 7
-
-
-# IAM SETTINGS
-IAM_TYPE = 'BASIC'
-IAM_BASE_EXCEPTION = None  # a class which will be used by IAM to report errors
-
-
-def GET_IAM_DEFAULT_ROLES(user) -> list:
-    return ['user']
-
-
-IAM_CONTEXT_BUILDERS = ['iam.utils.build_iam_context',]
-
-
-IAM_ADMIN_ROLE = 'admin'
-# Index in the list below corresponds to the priority (0 has highest priority)
-IAM_ROLES = [IAM_ADMIN_ROLE, 'business', 'user', 'worker']
-
-
-IAM_OPA_HOST = 'http://localhost:8181'
-IAM_OPA_DATA_URL = f'{IAM_OPA_HOST}/v1/data'
-# LOGIN_URL = 'rest_login'
-# LOGIN_REDIRECT_URL = '/'
-
-OBJECTS_NOT_RELATED_WITH_ORG = ['user', 'function', 'request', 'server',]
 
 IAM_OPA_BUNDLE_PATH = os.path.join(STATIC_ROOT, 'opa', 'bundle.tar.gz')
 os.makedirs(Path(IAM_OPA_BUNDLE_PATH).parent, exist_ok=True)
+
+
+ACCOUNT_USERNAME_MIN_LENGTH = 5
+ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
+
+ACCOUNT_ADAPTER = 'iam.adapters.DefaultAccountAdapterEx'
+
+# Database
+# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB'),
+        'USER': os.environ.get("POSTGRES_USER"),
+        'PASSWORD': os.environ.get("POSTGRES_PASSWORD"),
+        'HOST': os.environ.get("POSTGRES_HOST"),
+        'PORT': os.environ.get("POSTGRES_PORT"),
+    }
+}
+
+
+AUTH_USER_MODEL = "users.User"
+WSGI_APPLICATION = "audino_backend.wsgi.application"
+
+# Email Backend Configuration
+# Replace with your preferred backend
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_PORT = 587  # Replace with your email port
+EMAIL_USE_TLS = True  # Set to False if your email server doesn't use TLS
+
+# Replace with your email host for gmail -> 'smtp.gmail.com'
+EMAIL_HOST = 'smtp.gmail.com'
+
+# NOTE: Use the gmail id of your organization
+EMAIL_HOST_USER = ''  # Replace with your email username
+EMAIL_HOST_PASSWORD = ''  # Replace with your email password
