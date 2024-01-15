@@ -183,9 +183,9 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateMo
         queryset = super().get_queryset()
 
         # TODO: Add permission check
-        # if self.action == 'list':
-        #     perm = JobPermission.create_scope_list(self.request)
-        #     queryset = perm.filter(queryset)
+        if self.action == 'list':
+            perm = JobPermission.create_scope_list(self.request)
+            queryset = perm.filter(queryset)
 
         return queryset
 
