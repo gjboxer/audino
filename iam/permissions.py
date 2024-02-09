@@ -1097,7 +1097,10 @@ class JobPermission(OpenPolicyAgentPermission):
     def create(cls, request, view, obj, iam_context):
         permissions = []
         if view.basename == 'job':
+            # print(request.data)
+
             task_id = request.data.get('task_id')
+            # print(task_id)
             for scope in cls.get_scopes(request, view, obj):
                 scope_params = {}
 

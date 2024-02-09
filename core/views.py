@@ -16,7 +16,14 @@ from .utils import get_paginator
 from users.manager import TokenAuthentication
 from iam.permissions import *
 from organizations.mixins import PartialUpdateModelMixin
-
+import csv
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
+from django.db.models import Q
+from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+from rest_framework.parsers import JSONParser
 
 class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                      mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin, PartialUpdateModelMixin
@@ -162,7 +169,8 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateMo
                  ):
     queryset = Job.objects.select_related(
         'assignee', 'guide_id', 'task_id', 'project_id').all()
-
+    # queryset=Job.objects.all()
+    # print(queryset)
     iam_organization_field = 'task_id__organization'
     search_fields = ('assignee', 'state', 'stage')
     filter_fields = list(search_fields) + [
@@ -183,22 +191,90 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateMo
         queryset = super().get_queryset()
 
         # TODO: Add permission check
-        if self.action == 'list':
-            perm = JobPermission.create_scope_list(self.request)
-            queryset = perm.filter(queryset)
+        # if self.action == 'list':
+        #     perm = JobPermission.create_scope_list(self.request)
+        #     queryset = perm.filter(queryset)
+#             print("inside list")
+#             jobs_query=Job.objects.all()
+#             custom_filter = (
+#     Q(assignee=self.request.user) |
+#     Q(guide_id=self.request.user) |
+#     Q(task_id__owner=self.request.user) |
+#     Q(project_id__owner=self.request.user) |
+#     Q(project_id__assignee=self.request.user) |
+#     Q(task_id__assignee=self.request.user)
+# )
+
+#             # filtered_jobs = jobs_query.get(custom_filter)
+#             return jobs_query
+
+#         else:
+#             jobs_query=Job.objects.all()
 
         return queryset
 
     def get_serializer_class(self):
         if self.request.method in SAFE_METHODS:
+            # print("inside get_serializer_class")
             return GetJobSerializer
         else:
             return PostJobSerializer
 
+    from django.core.exceptions import ObjectDoesNotExist
+
+
     @transaction.atomic
     def perform_create(self, serializer):
-        super().perform_create(serializer)
-        serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
+        if self.request.FILES.get('file'):
+            try:
+                decoded_file = self.request.FILES.get('file').read().decode('utf-8').splitlines()
+                reader = csv.reader(decoded_file)
+                next(reader)  # Skip the header row
+    
+                jobs_to_create = []
+                for row in reader:
+                    email = row[0].strip()  
+                    stage = row[1].strip() 
+                    state = row[2].strip() 
+                    job_type = row[3].strip() 
+                    project_id = row[4].strip() 
+                    guide_email = row[5].strip()
+                    task_id = row[6].strip()
+    
+                    assignee, _ = User.objects.get_or_create(email=email)
+                    guide, _ = User.objects.get_or_create(email=guide_email)
+    
+                    # Create job data
+                    job_data = {
+                        'assignee': assignee.pk,
+                        'stage': stage,
+                        'state': state,
+                        'type': job_type,
+                        'project_id': project_id,
+                        'guide_id': guide.pk,
+                        'task_id': task_id,
+                        'task': task_id,
+                    }
+    
+                    # Serialize job data
+                    serializer = PostJobSerializer(data=job_data)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save()
+                # print("jobs created")
+                print("last serialiser instnce ",serializer.instance.__dict__)
+                final_serializer = GetJobSerializer(serializer.instance)
+                print("final_serializer",final_serializer.data)
+                serializer.instance = final_serializer.data
+
+            except csv.Error as e:
+                return Response({'error': f'Error parsing CSV file: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            except ObjectDoesNotExist as e:
+                return Response({'error': f'Object does not exist: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            super().perform_create(serializer)
+            serializer.instance = self.get_queryset().get(pk=serializer.instance.pk)
 
     def perform_destroy(self, instance):
         if instance.type != JobType.GROUND_TRUTH:

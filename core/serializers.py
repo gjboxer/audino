@@ -370,22 +370,26 @@ class GetTaskSerializer(serializers.ModelSerializer):
 
 class GetJobSerializer(serializers.ModelSerializer):
     assignee = UserSerializer()
+    assignee_id = serializers.IntegerField()
     organization = serializers.ReadOnlyField(
         source='task_id.organization.id', allow_null=True)
     task = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
-        # fields = '__all__'
-        exclude = ["task_id"]
+        fields = '__all__'
+        # exclude = ["task_id"]
+
 
     def get_task(self, obj):
+        print("get_task", obj ,obj.__dict__)
         if obj.task_id:
             task_serializer = GetTaskSerializer(obj.task_id)
             return task_serializer.data
         return None
 
     def to_representation(self, instance):
+        print('to_representation', instance)
         data = super().to_representation(instance)
     
         if request := self.context.get('request'):

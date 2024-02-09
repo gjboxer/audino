@@ -7,7 +7,7 @@ router = DefaultRouter(trailing_slash=True)
 router.register(r'projects', ProjectViewSet)
 router.register(r'labels', LabelViewSet)
 router.register(r'tasks', TaskViewSet)
-router.register(r'jobs', JobViewSet)
+router.register(r'jobs', JobViewSet, basename='job')
 router.register(r'jobs/(?P<job_id>[^/.]+)/annotation', JobAnnotationViewSet, basename='job_annotation')
 
 urlpatterns = [
